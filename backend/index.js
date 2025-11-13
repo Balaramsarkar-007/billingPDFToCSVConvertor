@@ -523,6 +523,22 @@ app.post('/api/pdf-to-csv', upload.single('pdf'), async (req, res) => {
   }
 });
 
+// test the server
+app.get('/api/test', (req, res) => {
+  res.json({ message: 'Server is running and ready to process PDFs.' });
+});
+
+// error handling middleware
+app.use((err, req, res, next) => {
+  console.error('Unhandled error:', err);
+  res.status(500).json({ error: 'Internal server error' });
+});
+
+// site not exist handler
+app.use((req, res) => {
+  res.status(404).json({ error: 'Endpoint not found' });
+});
+
 app.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
   console.log(`Enhanced parser with improved accuracy loaded`);
