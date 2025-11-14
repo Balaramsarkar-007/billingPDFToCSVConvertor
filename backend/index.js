@@ -126,6 +126,13 @@ function isValidDataRow(text) {
   // Skip completely empty rows
   if (!normalized) return false;
 
+  // DON'T skip opening balance row (we handle separately)
+  if (normalized.toLowerCase().includes('balance') && 
+      (normalized.toLowerCase().includes('carryforward') || 
+       normalized.toLowerCase().includes('carry forward'))) {
+    return false;
+  }
+
   // DON'T skip closing balance row
   if (normalized.toLowerCase().includes('closing balance')) {
     return false; // We handle this separately
@@ -357,6 +364,13 @@ function extractTableData(textItems) {
   
   const tableData = [];
   const skippedRows = [];
+
+  // ADD OPENING BALANCE AT THE TOP
+  const openingBalance = extractOpeningBalance(rows);
+  if (openingBalance) {
+    tableData.push(openingBalance);
+    console.log(`Added opening balance: ${openingBalance.Amount}`);
+  }
   
   for (let i = startIdx; i < rows.length; i++) {
     const row = rows[i];
@@ -415,10 +429,8 @@ function extractClosingBalance(rows) {
     if (text.includes('closing balance') || text.includes('closing') && text.includes('balance')) {
       const fullText = rows[i].text;
       
-      // Extract the balance amount
-      // Pattern: "Closing balance in INR" followed by amount or amount with negative sign
-      const amountMatch = fullText.match(/(-?[\d,]+\.\d{2})/);
-      const currencyMatch = fullText.match(/\b([A-Z]{3})\b/);
+      // Extract the balance amount (handles both positive and negative values)
+      const amountMatch = fullText.match(/(-?\d{1,3}(?:,\d{3})*(?:\.\d{2})?|-?\d+\.\d{2})/);
       
       if (amountMatch) {
         closingBalance = {
@@ -427,10 +439,10 @@ function extractClosingBalance(rows) {
           'Document date': '',
           'Due Date': '',
           'Amount': amountMatch[1].replace(/,/g, ''),
-          'Currency': currencyMatch ? currencyMatch[1] : 'INR',
+          'Currency': 'INR',
           'Description': 'Closing balance in INR',
           'CCA': 'LPG',
-          'Profit Center': '26010'
+          'Profit Center': ""
         };
         
         console.log(`Found closing balance: ${amountMatch[1]}`);
@@ -440,6 +452,129 @@ function extractClosingBalance(rows) {
   }
   
   return closingBalance;
+}
+
+// Add this new function before extractTableData()
+function extractOpeningBalance(rows) {
+  
+  const tableStartIdx = findTableStartIndex(rows);
+  const searchLimit = Math.min(tableStartIdx + 5, rows.length); // Search a bit beyond table start
+  
+  // Search through rows
+  for (let i = 0; i < searchLimit; i++) {
+    const currentText = rows[i].text.trim();
+    const currentTextLower = currentText.toLowerCase();
+    
+    // Pattern 1: Look for "Balance" followed by "carryforward" in same or next rows
+    if (currentTextLower.includes('balance')) {
+      
+      // Check current and next few rows for complete data
+      for (let j = i; j < Math.min(i + 5, rows.length); j++) {
+        const checkText = rows[j].text;
+        const checkTextLower = checkText.toLowerCase();
+        
+        // Look for carryforward indicator
+        const hasCarryforward = checkTextLower.includes('carryforward') || 
+                               checkTextLower.includes('carry forward');
+        
+        if (hasCarryforward || j === i) {
+          
+          // Try to extract date, amount, currency from this and nearby rows
+          let date = null;
+          let amount = null;
+          let currency = null;
+          
+          // Search in a window of rows around the current position
+          for (let k = Math.max(0, j - 1); k < Math.min(j + 4, rows.length); k++) {
+            const dataText = rows[k].text;
+            
+            // Extract date (DD.MM.YYYY format)
+            if (!date) {
+              const dateMatch = dataText.match(/(\d{2}\.\d{2}\.\d{4})/);
+              if (dateMatch) {
+                date = dateMatch[1];
+              }
+            }
+            
+            if (!amount) {
+              const amountMatch = dataText.match(/-?\d{3,}(?:,?\d{3})*\.\d{2}/);
+              if (amountMatch) {
+                // Clean the amount by removing commas
+                const cleanAmount = amountMatch[0].replace(/,/g, '');
+                const numValue = Math.abs(parseFloat(cleanAmount));
+                
+                // Filter: Amount should be > 100 to avoid matching small numbers
+                if (numValue > 100) {
+                  amount = cleanAmount;
+                }
+              }
+            }
+            
+            // Extract currency
+            if (!currency) {
+              const currencyMatch = dataText.match(/\b(INR|USD|EUR|GBP)\b/);
+              if (currencyMatch) {
+                currency = currencyMatch[1];
+              }
+            }
+            
+            // If we have amount and date, we can create the balance record
+            if (amount && date) {
+              const openingBalance = {
+                'Doc. No.': 'OPENING_BAL',
+                'Doc. Type': 'BAL',
+                'Document date': date,
+                'Due Date': date,
+                'Amount': amount,
+                'Currency': currency || 'INR',
+                'Description': 'Balance carryforward',
+                'CCA': 'LPG',
+                'Profit Center': '26010'
+              };
+              return openingBalance;
+            }
+          }
+        }
+      }
+    }
+    
+    const combinedText = i + 1 < rows.length 
+      ? (currentText + ' ' + rows[i + 1].text).trim()
+      : currentText;
+    
+    if ((combinedText.toLowerCase().includes('balance') && 
+         combinedText.toLowerCase().includes('carryforward')) ||
+        (combinedText.toLowerCase().includes('balance') && 
+         combinedText.toLowerCase().includes('carry forward'))) {
+      
+      const dateMatch = combinedText.match(/(\d{2}\.\d{2}\.\d{4})/);
+      // Amount regex: at least 3 digits + mandatory .XX decimal (avoids matching dates like 01.09)
+      const amountMatch = combinedText.match(/-?\d{3,}(?:,?\d{3})*\.\d{2}/);
+      const currencyMatch = combinedText.match(/\b(INR|USD|EUR|GBP)\b/);
+      
+      if (amountMatch) {
+        const cleanAmount = amountMatch[0].replace(/,/g, '');
+        const numValue = Math.abs(parseFloat(cleanAmount));
+        
+        // Only accept if amount is substantial (> 100)
+        if (numValue > 100) {
+          const openingBalance = {
+            'Doc. No.': 'OPENING_BAL',
+            'Doc. Type': 'BAL',
+            'Document date': dateMatch ? dateMatch[1] : '',
+            'Due Date': dateMatch ? dateMatch[1] : '',
+            'Amount': cleanAmount,
+            'Currency': currencyMatch ? currencyMatch[1] : 'INR',
+            'Description': 'Balance carryforward',
+            'CCA': 'LPG',
+            'Profit Center': '26010'
+          };
+          return openingBalance;
+        }
+      }
+    }
+  }
+  return null;
 }
 
 app.post('/api/pdf-to-csv', upload.single('pdf'), async (req, res) => {
@@ -478,7 +613,7 @@ app.post('/api/pdf-to-csv', upload.single('pdf'), async (req, res) => {
       });
     }
 
-      const closingBalRow = tableData.find(row => row['Doc. No.'] === 'CLOSING_BAL');
+    const closingBalRow = tableData.find(row => row['Doc. No.'] === 'CLOSING_BAL');
 
     // Convert to CSV
     const csv = Papa.unparse(tableData, {

@@ -62,7 +62,9 @@ function App() {
     if (!data?.csv) return;
     const element = document.createElement("a");
     element.href = "data:text/csv;charset=utf-8," + encodeURIComponent(data.csv);
-    element.download = `billing_data_${Date.now()}.csv`;
+    const month = data.data[0]?.['Document date']?.split('.')[1] || 'MM';
+    const id = data.extractedData[0]?.text;
+    element.download = `SOA_${id}_${month}.csv`;
     element.click();
     toast.success("CSV downloaded successfully!");
   };
@@ -102,9 +104,20 @@ function App() {
           <button
             type="submit"
             disabled={!file || loading}
-            className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 text-white font-semibold py-3 rounded-lg transition"
+            className="w-full bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 disabled:from-gray-400 disabled:to-gray-500 text-white font-semibold py-3 rounded-lg transition cursor-pointer flex items-center justify-center gap-2 relative overflow-hidden"
           >
-            {loading ? "Converting..." : "Convert PDF"}
+            {loading ? (
+              <>
+                <div className="flex gap-1">
+                  <span className="w-2 h-2 bg-white rounded-full animate-bounce"></span>
+                  <span className="w-2 h-2 bg-white rounded-full animate-bounce" style={{animationDelay: "0.1s"}}></span>
+                  <span className="w-2 h-2 bg-white rounded-full animate-bounce" style={{animationDelay: "0.2s"}}></span>
+                </div>
+                <span>Converting...</span>
+              </>
+            ) : (
+              "Convert PDF"
+            )}
           </button>
         </form>
 
@@ -122,7 +135,7 @@ function App() {
 
             <button
               onClick={downloadCSV}
-              className="w-full bg-green-600 hover:bg-green-700 text-white font-semibold py-3 rounded-lg transition"
+              className="w-full bg-gradient-to-r from-green-600 to-green-700 hover:from-green-700 hover:to-green-800 text-white font-semibold py-3 rounded-lg transition cursor-pointer"
             >
               ⬇️ Download CSV
             </button>
